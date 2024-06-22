@@ -1,0 +1,7 @@
+*.pyc
+/.idea/
+/bin/
+/lib/
+/pyvenv.cfg
+/json
+/lib64
