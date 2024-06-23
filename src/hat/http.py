@@ -376,9 +376,12 @@ class HTTPTestWrapper(TestWrapper):
         return result
 
 
-def handle_routes(session, hosts, routes):
+def handle_routes(session, hosts, routes, storage=None):
     for host in hosts:
-        host_storage = {}
+        if storage is None:
+            host_storage = {}
+        else:
+            host_storage = storage.copy()
         for route in routes:
             try:
                 resp = None
