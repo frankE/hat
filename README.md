@@ -16,7 +16,7 @@ It's just a quick hack, because I needed a tool like this. This may or may not b
 ## Installation
 
 Install the requirements from requirements.txt.
-Make sure the `hat` folder from inside the src folder is in your pythonpath and the `hat.py` script from the src folder is on your `$PATH`.
+Make sure the `hat` folder from inside the src folder is on your pythonpath and the `hat.py` script from the src folder is on your `$PATH`.
 
 ## Usage
 
