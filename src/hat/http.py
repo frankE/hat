@@ -1,4 +1,6 @@
 import json
+from typing import Iterable
+
 import requests as r
 from .decorators import test
 from .main import TestWrapper
@@ -165,9 +167,29 @@ class Route:
         return self.__str__()
 
 
-def set_urls(hosts, urls):
+def visit(routes, hosts=None, session=None, storage=None, config=CONFIG):
+    options = config['options']
+    if hosts is None:
+        hosts = config['hosts']
+    if session is None:
+        if 'session' in options:
+            session = r if not options['session'] else r.session()
+        else:
+            session = r
+    return handle_routes(session, hosts, routes, storage)
+
+
+def create_session():
+    return r.session()
+
+
+def set_urls(urls):
     global CONFIG
     CONFIG['routes'] = CONFIG['routes'] + urls
+
+
+def set_hosts(hosts):
+    global CONFIG
     CONFIG['hosts'] = CONFIG['hosts'] + hosts
 
 
@@ -217,39 +239,6 @@ def compare_response(resp, response, vars=None):
     return True
 
 
-def print_response(resp, verbosity=0):
-    if verbosity >= -1:
-        print("Request:", resp.request.method, resp.request.url)
-    if verbosity >= 1:
-        for k, v in resp.request.headers.items():
-            print(k + ": " + v)
-
-    if resp.request.body is not None and verbosity >= 2:
-        try:
-            obj = json.loads(resp.request.body.decode())
-            body = json.dumps(obj, sort_keys=True, indent=2)
-            for line in body.split("\n"):
-                print(line)
-        except json.JSONDecodeError as e:
-            print(resp.request.body.decode())
-
-    if verbosity >= 1:
-        print()
-    if verbosity >= 0:
-        print("Response:", resp.status_code, resp.reason)
-    if verbosity >= 1:
-        for k, v in resp.headers.items():
-            print(k + ": " + v)
-    if resp.content is not None and verbosity >= 2:
-        try:
-            obj = json.loads(resp.content.decode())
-            body = json.dumps(obj, sort_keys=True, indent=2)
-            for line in body.split("\n"):
-                print(line)
-        except r.exceptions.JSONDecodeError as e:
-            print(resp.content.decode())
-
-
 def filter_routes(route, routes):
     if route is None:
         return routes
@@ -270,6 +259,61 @@ def filter_hosts(host, hosts):
     return host.split(',')
 
 
+class HTTPCollectionResult:
+    def __init__(self, name, results):
+        self._iter = None
+        self._i = 0
+        self.name = name
+        self.title = name
+        self.results = [r for r in results]
+        success = True
+        for r in self.results:
+            success = success and r.success if hasattr(r, 'success') else r
+        self.success = success
+
+    def to_dict(self):
+        return {
+            "success": self.success,
+            "title": self.title,
+            "results": [r.to_dict() for r in self.results] if hasattr(self.results, 'to_dict') else self.results
+        }
+
+    def write_json(self, stream, verbosity=0):
+        return json.dumps(self.to_dict(), sort_keys=True, indent=2)
+
+    def write(self, stream, verbosity=0, indent=0):
+        stream.write(" " * indent + self.title + "\n")
+        if verbosity >= 1:
+            for r in self.results:
+                if hasattr(r, "write") and hasattr(r, "success"):
+                    if verbosity >= 2:
+                        r.write(stream, verbosity, indent + 2)
+                    elif verbosity == 1 and not r.success:
+                        r.write(stream, verbosity, indent + 2)
+        stream.flush()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._i >= len(self.results):
+            raise StopIteration
+        if isinstance(self.results[self._i], Iterable):
+            if self._iter is None:
+                self._iter = self.results[self._i].__iter__()
+            res = self._iter.__next__()
+            if res is not None:
+                return res
+            else:
+                self._i += 1
+                self._iter = None
+                if self._i >= len(self.results):
+                    raise StopIteration
+        res = self.results[self._i]
+        self._i += 1
+        return res
+
+
 class HTTPResult:
     def __init__(self, message, success, route, host, response=None):
         self.message = message
@@ -277,7 +321,7 @@ class HTTPResult:
         self.route = route
         self.host = host
         self.response = response
-        self.title = str(route) + ": " +url(host, route.path)
+        self.title = str(route) + ": " + url(host, route.path)
 
     def to_dict(self):
         try:
@@ -315,42 +359,55 @@ class HTTPResult:
     def write_json(self, stream, verbosity=0):
         stream.write(json.dumps(self.to_dict(), sort_keys=True, indent=2))
 
-    def write(self, stream, verbosity=0):
+    def write(self, stream, verbosity=0, indent=0):
         if self.response is None and self.message is not None:
-            stream.write(self.message)
+            stream.write(" " * indent + self.message)
             return
         if verbosity >= 1:
+            stream.write(" " * indent)
             stream.write("Request: " + self.response.request.method + " " + self.response.request.url + "\n")
+            stream.write(" " * indent)
             stream.write("Request Headers:\n")
             for k, v in self.response.request.headers.items():
+                stream.write(" " * indent)
                 stream.write(k + ": " + v + "\n")
         if self.response.request.body is not None and verbosity >= 2:
+            stream.write(" " * indent)
             stream.write("Request Body:\n")
             try:
                 obj = json.loads(self.response.request.body)
                 body = json.dumps(obj, sort_keys=True, indent=2)
+                body = "\n".join([" " * indent + part for part in body.split("\n")])
                 stream.write(body)
             except json.JSONDecodeError as e:
-                stream.write(self.response.request.body)
+                body = "\n".join([" " * indent + part for part in self.response.request.body.split("\n")])
+                stream.write(body)
 
         if verbosity >= 1:
             stream.write("\n")
         if verbosity >= 1:
+            stream.write(" " * indent)
             stream.write("Response: " + str(self.response.status_code) + " " + self.response.reason + "\n")
+            stream.write(" " * indent)
             stream.write("Response Headers:\n")
             for k, v in self.response.headers.items():
+                stream.write(" " * indent)
                 stream.write(k + ": " + v + "\n")
         if self.response.content is not None and verbosity >= 2:
+            stream.write(" " * indent)
             stream.write("Response Body:\n")
             try:
                 obj = json.loads(self.response.content.decode())
                 body = json.dumps(obj, sort_keys=True, indent=2)
+                body = "\n".join([" " * indent + part for part in body.split("\n")])
                 stream.write(body)
             except json.JSONDecodeError as e:
-                stream.write(self.response.content.decode())
+                body = "\n".join([" " * indent + part for part in self.response.request.body.split("\n")])
+                stream.write(body)
+        stream.flush()
 
 
-class HTTPTestWrapper(TestWrapper):
+class HttpRoutesWrapper(TestWrapper):
     def __init__(self):
         super().__init__()
         self.builtin = True
@@ -376,12 +433,17 @@ class HTTPTestWrapper(TestWrapper):
         return result
 
 
+class HttpWrapper(TestWrapper):
+    def __call__(self, *args, **kwargs):
+        return HTTPCollectionResult(self.name, self.func(*args, **kwargs))
+
+
 def handle_routes(session, hosts, routes, storage=None):
     for host in hosts:
         if storage is None:
             host_storage = {}
         else:
-            host_storage = storage.copy()
+            host_storage = storage
         for route in routes:
             try:
                 resp = None
@@ -419,8 +481,8 @@ def handle_routes(session, hosts, routes, storage=None):
                 yield HTTPResult(str(e) + "\n", False, route, host)
 
 
-@test(wrapper=HTTPTestWrapper)
-def http(route=None, host=None, use_session=None, config=CONFIG):
+@test(wrapper=HttpRoutesWrapper)
+def test_routes(route=None, host=None, use_session=None, config=CONFIG):
     options = config['options']
 
     if use_session is None and 'session' in options:
@@ -432,6 +494,7 @@ def http(route=None, host=None, use_session=None, config=CONFIG):
     else:
         session = r
     if len(routes) == 0:
-        yield HTTPResult("No routes found.", False, Route('/'), '/')
+        # yield HTTPResult("No routes found.", False, Route('/'), '/')
+        pass
     else:
         yield from handle_routes(session, hosts, routes)

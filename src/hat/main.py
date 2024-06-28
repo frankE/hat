@@ -52,9 +52,12 @@ def setup(tests):
     if hasattr(tests, "CONFIG"):
         from hat.http import set_config
         set_config(tests.CONFIG)
-    if hasattr(tests, "ROUTES") and hasattr(tests, "HOSTS"):
+    if hasattr(tests, "ROUTES"):
         from hat.http import set_urls
-        set_urls(tests.HOSTS, tests.ROUTES)
+        set_urls(tests.ROUTES)
+    if hasattr(tests, "HOSTS"):
+        from hat.http import set_hosts
+        set_hosts(tests.HOSTS)
     if hasattr(tests, "OPTIONS"):
         from hat.http import set_options
         set_options(tests.OPTIONS)
@@ -66,7 +69,10 @@ def run(tests, function_name, args=None, command_args=None):
     fn = name_to_python(function_name)
     if fn in tasks:
         sys.stdout = io.StringIO()
-        success = tasks[fn](**filter_args(args, tasks[fn].args))
+        try:
+            success = tasks[fn](**filter_args(args, tasks[fn].args))
+        except Exception as e:
+            success = False
         if isinstance(success, Iterable):
             for s in success:
                 output = sys.stdout.getvalue()
