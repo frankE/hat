@@ -106,6 +106,8 @@ Lastly testcases can be composed out of individual tests. E.g.:
 ```python
 from hat.decorators import http_test
 from hat.http import Route, Extractor, visit, create_session
+HOSTS = ["http://127.0.0.1:8000"]
+
 @http_test()
 def test_login(session=None, storage=None):
    routes = [
@@ -132,4 +134,6 @@ def create_user():
    ]
    results = results + visit(routes, None, session, storage)
    return results
+
+# ...
 ```
