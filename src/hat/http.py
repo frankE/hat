@@ -315,20 +315,6 @@ class HTTPCollectionResult:
         return self.results.__iter__()
 
 
-class HTTPRoutesResult(HTTPCollectionResult):
-    def write(self, stream, verbosity=0, indent=0):
-        if verbosity >= 0:
-            for r in self.results:
-                if hasattr(r, "write") and hasattr(r, "success"):
-                    if verbosity >= 1 and r.success:
-                        r.write(stream, verbosity-1, indent + 2)
-                        stream.write("\n")
-                    elif verbosity >= 0 and not r.success:
-                        r.write(stream, 2, indent + 2)
-                        stream.write("\n")
-        stream.flush()
-
-
 class HTTPResult:
     def __init__(self, message, success, route, host, response=None):
         self.message = message
