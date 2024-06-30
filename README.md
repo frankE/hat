@@ -71,10 +71,11 @@ def login_test(username='admin', password='test'):          # Parameters can be 
     return True  # or False for a failed test
 ```
 
-Another possibility of defining HTTP tests is to leverage the built-in HTTP test method e.g.:
+For quick testing of a couple of routes there is the builtin `test_routes` test which tests all routes in the `ROUTES` list.
 
 ```python
 from hat.http import Route, Extractor, Response
+from hat.builtin import test_routes
 
 HOSTS = ["http://test.example.com/", "https://staging.example.com"]     # Per default all routes will be called per host
 
@@ -97,10 +98,38 @@ ROUTES = [
 
 For the latter, you get a list of all defined routes via:
 ```
-hat list http
+hat list test_routes
 ```
 
-## Output
+Lastly testcases can be composed out of individual tests. E.g.:
 
-HAT provides colorized console output when run from a terminal. For machine-readable output, use the `-j` option to get JSON-formatted results.
+```python
+from hat.decorators import http_test
+from hat.http import Route, Extractor, visit, create_session
+@http_test()
+def test_login(session=None, storage=None):
+   routes = [
+      Route("/login", "POST", response=200,
+            body={"username": "admin", "password": "admin"},
+            store=[Extractor("response.body-object.id", "adminUserId")],
+            doc="Login as an admin"),
+   ]
+   return visit(routes, None, session, storage)
 
+
+@http_test()
+def create_user():
+   session = create_session()
+   storage = {}
+   results = test_login(session)
+   routes = [
+      Route("/users", "POST", response=201,
+            body={"username": "test"},
+            store=[Extractor("response.body-object.id", "newUserId")],
+            doc="Create an user."),
+      Route("/users/{newUserId}", "GET", response=200,
+            doc="Get the newly created user by id"),
+   ]
+   results = results + visit(routes, None, session, storage)
+   return results
+```
