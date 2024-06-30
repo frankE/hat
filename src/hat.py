@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+import sys
+
 import hat.cmd
 if __name__ == '__main__':
-    hat.cmd.main()
-
+    retval = hat.cmd.main()
+    sys.exit(retval)

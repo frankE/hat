@@ -29,7 +29,7 @@ class HatFileTestCase(unittest.TestCase):
         sys.argv.append("-v")
         sys.argv.append("list")
         hat.cmd.main()
-        print("This test should output 2 route descriptions and their urls and method")
+        print("This test should output 3 route descriptions and their urls and method as well as 4 test methods")
         print()
 
     def test_hatfile(self):
@@ -38,14 +38,14 @@ class HatFileTestCase(unittest.TestCase):
         sys.argv.append("-f=" + os.path.join(os.path.abspath(os.path.dirname(__file__)), "hatfile.py"))
         sys.argv.append("runall")
         hat.cmd.main()
-        print("This test should output 2 successful tests")
+        print("This test should output 2 successful tests and 3 failed tests")
         print()
 
     def test_hatfile_filtered(self):
         sys.argv.clear()
         sys.argv.append("hat")
         sys.argv.append("-f=" + os.path.join(os.path.abspath(os.path.dirname(__file__)), "hatfile.py"))
-        sys.argv.append("http")
+        sys.argv.append("test_http")
         sys.argv.append("--route=2")
         hat.cmd.main()
         print("This test should output 1 failed tests")

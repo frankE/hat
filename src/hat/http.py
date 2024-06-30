@@ -261,57 +261,72 @@ def filter_hosts(host, hosts):
 
 class HTTPCollectionResult:
     def __init__(self, name, results):
-        self._iter = None
-        self._i = 0
         self.name = name
         self.title = name
-        self.results = [r for r in results]
         success = True
-        for r in self.results:
-            success = success and r.success if hasattr(r, 'success') else r
-        self.success = success
+        if isinstance(results, list):
+            self.results = results
+            for r in self.results:
+                success = success and r.success if hasattr(r, 'success') else r
+            self.success = success
+        elif isinstance(results, HTTPCollectionResult):
+            self.results = results.results
+            self.success = results.success
 
     def to_dict(self):
         return {
             "success": self.success,
             "title": self.title,
-            "results": [r.to_dict() for r in self.results] if hasattr(self.results, 'to_dict') else self.results
+            "results": [r.to_dict() if hasattr(r, 'to_dict') else r for r in self.results]
         }
 
-    def write_json(self, stream, verbosity=0):
-        return json.dumps(self.to_dict(), sort_keys=True, indent=2)
-
     def write(self, stream, verbosity=0, indent=0):
-        stream.write(" " * indent + self.title + "\n")
         if verbosity >= 1:
             for r in self.results:
                 if hasattr(r, "write") and hasattr(r, "success"):
                     if verbosity >= 2:
                         r.write(stream, verbosity, indent + 2)
+                        stream.write("\n")
                     elif verbosity == 1 and not r.success:
-                        r.write(stream, verbosity, indent + 2)
+                        r.write(stream, 2, indent + 2)
+                        stream.write("\n")
         stream.flush()
 
-    def __iter__(self):
-        return self
+    def __add__(self, other):
+        if not isinstance(other, HTTPCollectionResult) and not isinstance(other, list):
+            raise NotImplemented
+        if isinstance(other, HTTPCollectionResult):
+            return HTTPCollectionResult(self.name, self.results + other.results)
+        if isinstance(other, list):
+            return HTTPCollectionResult(self.name, self.results + other)
 
-    def __next__(self):
-        if self._i >= len(self.results):
-            raise StopIteration
-        if isinstance(self.results[self._i], Iterable):
-            if self._iter is None:
-                self._iter = self.results[self._i].__iter__()
-            res = self._iter.__next__()
-            if res is not None:
-                return res
-            else:
-                self._i += 1
-                self._iter = None
-                if self._i >= len(self.results):
-                    raise StopIteration
-        res = self.results[self._i]
-        self._i += 1
-        return res
+    def __iadd__(self, other):
+        if not isinstance(other, HTTPCollectionResult) and not isinstance(other, list):
+            raise NotImplemented
+
+        if isinstance(other, HTTPCollectionResult):
+            self.results += other.results
+            return self
+        if isinstance(other, list):
+            self.results += other
+            return self
+
+    def __iter__(self):
+        return self.results.__iter__()
+
+
+class HTTPRoutesResult(HTTPCollectionResult):
+    def write(self, stream, verbosity=0, indent=0):
+        if verbosity >= 0:
+            for r in self.results:
+                if hasattr(r, "write") and hasattr(r, "success"):
+                    if verbosity >= 1 and r.success:
+                        r.write(stream, verbosity-1, indent + 2)
+                        stream.write("\n")
+                    elif verbosity >= 0 and not r.success:
+                        r.write(stream, 2, indent + 2)
+                        stream.write("\n")
+        stream.flush()
 
 
 class HTTPResult:
@@ -360,6 +375,7 @@ class HTTPResult:
         stream.write(json.dumps(self.to_dict(), sort_keys=True, indent=2))
 
     def write(self, stream, verbosity=0, indent=0):
+        stream.write(" " * indent + self.title)
         if self.response is None and self.message is not None:
             stream.write(" " * indent + self.message)
             return
@@ -402,8 +418,9 @@ class HTTPResult:
                 body = "\n".join([" " * indent + part for part in body.split("\n")])
                 stream.write(body)
             except json.JSONDecodeError as e:
-                body = "\n".join([" " * indent + part for part in self.response.request.body.split("\n")])
-                stream.write(body)
+                if self.response.request.body is not None:
+                    body = "\n".join([" " * indent + part for part in self.response.request.body.split("\n")])
+                    stream.write(body)
         stream.flush()
 
 
@@ -411,6 +428,9 @@ class HttpRoutesWrapper(TestWrapper):
     def __init__(self):
         super().__init__()
         self.builtin = True
+
+    def __call__(self, *args, **kwargs):
+        return HTTPCollectionResult('ROUTES', self.func(*args, **kwargs))
 
     def short_help(self):
         result = [self.name, "  routes:"]
@@ -439,6 +459,7 @@ class HttpWrapper(TestWrapper):
 
 
 def handle_routes(session, hosts, routes, storage=None):
+    results = []
     for host in hosts:
         if storage is None:
             host_storage = {}
@@ -462,39 +483,20 @@ def handle_routes(session, hosts, routes, storage=None):
                     if route.store is not None:
                         for store in route.store:
                             host_storage[store.key] = store.value_from_result(result.to_dict())
-                    yield result
                 if resp is None:
-                    pass
+                    result = HTTPResult(f"Unknown route: '{route.path}'", False, route, host)
+                    # pass
                 elif not compare_response(resp, route.response, host_storage):
                     result = HTTPResult("Unexpected response", False, route, host, resp)
                     if route.store is not None:
                         for store in route.store:
                             host_storage[store.key] = store.value_from_result(result.to_dict())
-                    yield result
                 else:
                     result = HTTPResult("Ok", True, route, host, resp)
                     if route.store is not None:
                         for store in route.store:
                             host_storage[store.key] = store.value_from_result(result.to_dict())
-                    yield result
             except Exception as e:
-                yield HTTPResult(str(e) + "\n", False, route, host)
-
-
-@test(wrapper=HttpRoutesWrapper)
-def test_routes(route=None, host=None, use_session=None, config=CONFIG):
-    options = config['options']
-
-    if use_session is None and 'session' in options:
-        use_session = options['session']
-    routes = filter_routes(route, config['routes'])
-    hosts = filter_hosts(host, config['hosts'])
-    if use_session:
-        session = r.session()
-    else:
-        session = r
-    if len(routes) == 0:
-        # yield HTTPResult("No routes found.", False, Route('/'), '/')
-        pass
-    else:
-        yield from handle_routes(session, hosts, routes)
+                result = HTTPResult(str(e) + "\n", False, route, host)
+            results.append(result)
+    return results

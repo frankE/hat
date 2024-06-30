@@ -9,6 +9,102 @@ FAIL = '\033[91m'
 ENDC = '\033[0m'
 
 
+class JsonOutput(object):
+    def __init__(self):
+        self.serializable = []
+
+    def write(self, results):
+        assert len(results) == 2
+        lines = results[0]
+        result = results[1]
+        if hasattr(result, 'to_dict'):
+            sys.stderr.write("\n".join(lines))
+            self.serializable.append(dict(result.to_dict()))
+        else:
+            self.serializable.append({"success": bool(result), "message": "\n".join(lines)})
+
+    def finalize(self):
+        json.dump(self.serializable, sys.stdout, indent=2)
+
+
+class ReadableOutput(object):
+    def __init__(self, verbosity=0, color=True):
+        self.summary = []
+        self.verbosity = verbosity
+        self.color = color
+
+    def write(self, results):
+        assert len(results) == 2
+        lines = results[0]
+        result = results[1]
+        if isinstance(result, bool):
+            self._output_lines(lines, result)
+            if not result:
+                self.summary.append("- " + lines[0])
+        elif hasattr(result, 'success') and hasattr(result, 'title') and hasattr(result, 'write'):
+            self._output_result(lines, result)
+            if not result.success:
+                self.summary.append("- " + result.title)
+        else:
+            raise Exception("Oh no!")
+
+    def finalize(self):
+        if len(self.summary) > 0:
+            sys.stderr.write("\n")
+            sys.stderr.write(FAIL) if self.color and sys.stderr.isatty() else None
+            sys.stderr.write(f"Failed tests: {len(self.summary)}\n")
+            sys.stderr.write("\n".join(self.summary))
+            sys.stderr.write(ENDC) if self.color and sys.stderr.isatty() else None
+            sys.stderr.write("\n")
+        else:
+            sys.stderr.write("\n")
+            sys.stderr.write(OK) if self.color and sys.stderr.isatty() else None
+            sys.stderr.write("All tests passed\n")
+            sys.stderr.write(ENDC) if self.color and sys.stderr.isatty() else None
+            sys.stderr.write("\n")
+
+    def _output_lines(self, lines, result):
+        if result:
+            stream = sys.stdout
+            #stream.write("\n")
+            if stream.isatty() and self.color:
+                stream.write(OK)
+                stream.write('\N{check mark}' + " ")
+        else:
+            stream = sys.stderr
+            # stream.write("\n")
+            if stream.isatty() and self.color:
+                stream.write(FAIL)
+                stream.write('\N{ballot x}' + " ")
+        if len(lines) > 0:
+            stream.write(lines[0] + "\n")
+        if stream.isatty() and self.color:
+            stream.write(ENDC)
+        for line in lines[1:]:
+            stream.write(line + "\n")
+
+    def _output_result(self, lines, result):
+        if result.success:
+            stream = sys.stdout
+            # if self.verbosity > 0:
+            #     stream.write("\n")
+            if stream.isatty() and self.color:
+                stream.write(OK)
+                stream.write('\N{check mark}' + " ")
+        else:
+            stream = sys.stderr
+            # if self.verbosity > 0:
+            #     stream.write("\n")
+            if stream.isatty() and self.color:
+                stream.write(FAIL)
+                stream.write('\N{ballot x}' + " ")
+        stream.write(result.title + "\n")
+        if stream.isatty() and self.color:
+            stream.write(ENDC)
+        result.write(stream, self.verbosity)
+        sys.stderr.write("\n".join(lines))
+
+
 def parse_arguments(args):
     p = {}
     for arg in args:
@@ -53,88 +149,6 @@ def parse_args(argv):
     return command, command_args, what, args
 
 
-def output_result(lines, outcome, color=True, verbosity=0):
-    if not hasattr(outcome, 'success') or not hasattr(outcome, 'title') or not hasattr(outcome, 'write'):
-        sys.stderr.write("Invalid result object\n")
-        return
-    if outcome.success:
-        stream = sys.stdout
-        if verbosity > 0:
-            stream.write("\n")
-        if stream.isatty() and color:
-            stream.write(OK)
-            stream.write('\N{check mark}' + " ")
-    else:
-        stream = sys.stderr
-        if verbosity > 0:
-            stream.write("\n")
-        if stream.isatty() and color:
-            stream.write(FAIL)
-            stream.write('\N{ballot x}' + " ")
-    stream.write(outcome.title + "\n")
-    if stream.isatty() and color:
-        stream.write(ENDC)
-    outcome.write(stream, verbosity)
-    sys.stderr.write("\n".join(lines))
-
-
-def output_lines(lines, outcome, color=True):
-    if outcome:
-        stream = sys.stdout
-        stream.write("\n")
-        if stream.isatty() and color:
-            stream.write(OK)
-            stream.write('\N{check mark}' + " ")
-    else:
-        stream = sys.stderr
-        stream.write("\n")
-        if stream.isatty() and color:
-            stream.write(FAIL)
-            stream.write('\N{ballot x}' + " ")
-    if len(lines) > 0:
-        stream.write(lines[0] + "\n")
-    if stream.isatty() and color:
-        stream.write(ENDC)
-    for line in lines[1:]:
-        stream.write(line + "\n")
-
-
-def output(results, color=True, json_output=False, verbosity=0):
-    if json_output:
-        serializable = []
-        for lines, result in results:
-            if hasattr(result, 'to_dict'):
-                sys.stderr.write("\n".join(lines))
-                serializable.append(dict(result.to_dict()))
-            else:
-                serializable.append({"success": bool(result), "message": "\n".join(lines)})
-        sys.stdout.write(json.dumps(serializable, indent=2))
-    else:
-        summary = []
-        for lines, result in results:
-            if isinstance(result, bool):
-                output_lines(lines, result, color)
-                if not result:
-                    summary.append(lines[0])
-            else:
-                output_result(lines, result, color, verbosity)
-                if not result.success:
-                    summary.append("- " + result.title)
-        if len(summary) > 0:
-            sys.stderr.write("\n")
-            sys.stderr.write(FAIL) if color and sys.stderr.isatty() else None
-            sys.stderr.write(f"Failed tests: {len(summary)}\n")
-            sys.stderr.write("\n".join(summary))
-            sys.stderr.write(ENDC) if color and sys.stderr.isatty() else None
-            sys.stderr.write("\n")
-        else:
-            sys.stderr.write("\n")
-            sys.stderr.write(OK) if color and sys.stderr.isatty() else None
-            sys.stderr.write("All tests passed\n")
-            sys.stderr.write(ENDC) if color and sys.stderr.isatty() else None
-            sys.stderr.write("\n")
-
-
 def print_help(lines):
     sys.stdout.write("\n".join(lines))
     sys.stdout.write("\n")
@@ -153,30 +167,33 @@ def load_tests(file):
 
 
 def main():
+    success = True
     (command, command_args, what, args) = parse_args(sys.argv[1:])
     if command is None and what is None:
         print_usage()
         sys.exit(1)
     command_args = parse_arguments(command_args)
     file = command_args['f'] if 'f' in command_args else os.path.join(os.getcwd(), 'hatfile.py')
-    json = True if 'j' in command_args else False
     verbosity = int(command_args['v']) if 'v' in command_args else 0
-    result_list = []
+    output = JsonOutput() if 'j' in command_args else ReadableOutput(verbosity, True)
     tests = load_tests(file)
     setup(tests)
     args = parse_arguments(args)
-    color = True
     if command == 'run':
-        for result in run(tests, what, args, command_args):
-            result_list.append(result)
-        output(result_list, color, json, verbosity)
+        result = run(tests, what, args, command_args)
+        success &= result[1].success if hasattr(result[1], 'success') else bool(result[1])
+        output.write(result)
+        output.finalize()
     elif command == 'list':
         print_help(list_tests(tests, what, command_args))
     elif command == 'runall':
         for result in runall(tests, args, command_args):
-            result_list.append(result)
-        output(result_list, color, json, verbosity)
+            success &= result[1].success if hasattr(result[1], 'success') else bool(result[1])
+            output.write(result)
+        output.finalize()
     else:
         result = (["Unknown command: " + " ".join(sys.argv)], False)
-        result_list.append(result)
-        output(result_list, color, json, verbosity)
+        output.write(result)
+        success = False
+    return 0 if success else 1
+

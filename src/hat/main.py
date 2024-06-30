@@ -1,7 +1,7 @@
 import sys
 import importlib.machinery
 import importlib.util
-from collections.abc import Iterable
+import traceback
 import io
 
 tasks = {}
@@ -71,40 +71,41 @@ def run(tests, function_name, args=None, command_args=None):
         sys.stdout = io.StringIO()
         try:
             success = tasks[fn](**filter_args(args, tasks[fn].args))
-        except Exception as e:
+        except:
             success = False
-        if isinstance(success, Iterable):
-            for s in success:
-                output = sys.stdout.getvalue()
-                sys.stdout = stdout
-                output_lines = output.split("\n")
-                result = [output_lines, s]
-                yield result
-                sys.stdout = io.StringIO()
+            output = sys.stdout.getvalue()
             sys.stdout = stdout
+            output += traceback.format_exc()
+            output_lines = output.split("\n")
+            result = [[function_name + ": "] + output_lines, success]
+            return result
+        if hasattr(success, 'write') and hasattr(success, 'title') and hasattr(success, 'success'):
+            output = sys.stdout.getvalue()
+            sys.stdout = stdout
+            if output.strip() != '':
+                output_lines = output.split("\n")
+            else:
+                output_lines = []
+            result = [output_lines, success]
         else:
             output = sys.stdout.getvalue()
             sys.stdout = stdout
-            output_lines = output.split("\n")
+            if output.strip() != '':
+                output_lines = output.split("\n")
+            else:
+                output_lines = []
             result = [[function_name + ": "] + output_lines, success]
-            yield result
     else:
         result = [[f"Test '{function_name}' not found"], False]
-        yield result
+    return result
 
 
 def runall(tests, args=None, command_args=None):
-    results = []
     for k, v in tasks.items():
         name = k
         if v.builtin and get_ignore_builtin(tests):
             continue
-        result = run(tests, name, args, command_args)
-        if isinstance(result, Iterable):
-            for r in result:
-                yield r
-        else:
-            yield result
+        yield run(tests, name, args, command_args)
 
 
 def list_tests(tests, what=None, command_args=None):
@@ -128,7 +129,7 @@ def list_tests(tests, what=None, command_args=None):
             else:
                 result += tasks[name].short_help()
         else:
-            result += [f"Test not found: '{what}'"]
+           result += [f"Test not found: '{what}'"]
 
     return result
 
